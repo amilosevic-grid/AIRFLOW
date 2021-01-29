@@ -57,7 +57,8 @@ def create_dag(dag_id, schedule_interval, start_date):
     )
     query_the_table = DummyOperator(
         task_id='query_the_table',
-        dag=dag
+        dag=dag,
+        do_xcom_push="{{run_id}} ended"
     )
     create_table = DummyOperator(
         task_id='create_table',
