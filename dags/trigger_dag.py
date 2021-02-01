@@ -14,9 +14,14 @@ default_path = '/Users/aleksandarmilosevic/PycharmProjects/AIRFLOW/run.txt'
 path = Variable.get('path_to_file', default_var=default_path)
 
 def print_res(**context):
-    context = get_current_context()
+    # context = get_current_context()
     ti = context['ti']
-    print(ti.xcom_pull(task_ids='query_the_table'))
+    print('=======================================')
+    print(ti.xcom_pull(task_ids='query_the_table', dag_id='dag_id_3'))
+    print('=======================================')
+    print(context)
+    print('=======================================')
+
 
 
 def create_sub_dag(parent_dag, start_date, schedule_interval):
@@ -37,7 +42,7 @@ def create_sub_dag(parent_dag, start_date, schedule_interval):
         )
         create_timestamp = BashOperator(
             task_id='create_timestamp',
-            bash_command=f'touch file_{{ ts_nodash }}',
+            bash_command='touch ~/timestamp_{{ ts_nodash }}',
         )
         task_sensor >> print_results >> remove_file >> create_timestamp
     return dag
@@ -50,7 +55,8 @@ def pusher():
 with DAG(dag_id='trigger_run', start_date=datetime(2021, 1, 26), schedule_interval='@once') as dag:
     check_for_file = FileSensor(
         task_id='check_for_file',
-        filepath=path
+        filepath=path,
+        poke_interval=5
     )
     trigger_dag = TriggerDagRunOperator(
         task_id='trigger_dag',
