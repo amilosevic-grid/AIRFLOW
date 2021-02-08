@@ -10,19 +10,19 @@ $ ./setup.zsh
 ### Start webserver
 
 ```
-airflow webserver
+$ airflow webserver
 ```
 
 ### Copy dags to dags folder
 
 ```
-cp dags/* path_to_dags_folder
+$ cp dags/* path_to_dags_folder
 ```
 
 ### Start scheduler
 
 ```
-airflow scheduler
+$ airflow scheduler
 ```
 
 
