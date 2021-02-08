@@ -1,66 +1,64 @@
 from datetime import datetime
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator, get_current_context
+from airflow.operators.dummy import DummyOperator
 from airflow.operators.subdag import SubDagOperator
 from airflow.models.variable import Variable
+from airflow.sensors.filesystem import FileSensor
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sensors.external_task import ExternalTaskSensor
+import logging
 from slack import WebClient
 from slack.errors import SlackApiError
-from smart_sensor_file import SmartFileSensor
+from airflow.models.connection import Connection
+from airflow.providers.http.hooks.http import HttpHook
+import json
 
 
-# paths to files
 default_path = '/Users/aleksandarmilosevic/PycharmProjects/AIRFLOW/run.txt'
 path = Variable.get('path_to_file', default_var=default_path)
-slack_token = Variable.get('slack_token')
-# token = 'xoxb-1727046194672-1709378985940-A6HDRTXvZKqhpy8OFC7aBBOf'
+slack_hook = HttpHook.get_connection(conn_id='slack_conn').extra
+slack_token = json.loads(slack_hook)['token']
 
 
-# function for pulling value from query_table task
 def print_res(**context):
+    # context = get_current_context()
     ti = context['ti']
     print('=======================================')
     print(ti.xcom_pull(task_ids='query_the_table', dag_id='dag_id_3'))
     print('=======================================')
+    print(context)
+    print('=======================================')
 
 
-# function that sends a message to a slack channel
-def slack_message(**context):
+def slack_message():
     client = WebClient(token=slack_token)
-    run_id = context['run_id']
-    exec_date = context['ds']
     try:
         response = client.chat_postMessage(
                 channel="general",
-                text=f"{run_id} finished  on date {exec_date}")
+                text="Hello from your app! :tada:")
     except SlackApiError as e:
         # You will get a SlackApiError if "ok" is False
         assert e.response["error"]  # str like 'invalid_auth', 'channel_not_found'
 
 
-# function that creates sub_dag
-def create_sub_dag(parent_dag, sub_dag_name, start_date, schedule_interval):
-    with DAG(dag_id=f'{parent_dag}.{sub_dag_name}', start_date=start_date, schedule_interval=schedule_interval) as dag:
-        # senses if external dag has started
+def create_sub_dag(parent_dag, start_date, schedule_interval):
+    with DAG(dag_id=f'{parent_dag}.process_results_dag', start_date=start_date, schedule_interval=schedule_interval) as dag:
         task_sensor = ExternalTaskSensor(
             task_id='task_sensor',
             external_dag_id='dag_id_3',
             external_task_id=None,
             poke_interval=15
         )
-        # prints results
         print_results = PythonOperator(
             task_id='print_results',
             python_callable=print_res
         )
-        # removes file
         remove_file = BashOperator(
             task_id='remove_file',
             bash_command=f'rm -f {path}'
         )
-        # creates a file with appropriate timestamp
         create_timestamp = BashOperator(
             task_id='create_timestamp',
             bash_command='touch ~/timestamp_{{ ts_nodash }}',
@@ -69,32 +67,29 @@ def create_sub_dag(parent_dag, sub_dag_name, start_date, schedule_interval):
     return dag
 
 
-# creates a dag
 with DAG(dag_id='trigger_run', start_date=datetime(2021, 1, 26), schedule_interval='@once') as dag:
-    # checks if a file exists
-    check_for_file = SmartFileSensor(
+    check_for_file = FileSensor(
         task_id='check_for_file',
-        filepath=path
+        filepath=path,
+        poke_interval=5
     )
-    # triggers another dag
     trigger_dag = TriggerDagRunOperator(
         task_id='trigger_dag',
         trigger_dag_id='dag_id_3',
         execution_date='{{ execution_date }}'
     )
-    # creates a sub_dag that processes results
     process_results = SubDagOperator(
         task_id='process_results_dag',
-        subdag=create_sub_dag(
-            dag.dag_id,
-            'process_results_dag',
-            start_date=datetime(2021, 1, 26),
-            schedule_interval='@once')
-        ),
-    # sends a slack  message
+        subdag=create_sub_dag(dag.dag_id, start_date=datetime(2021, 1, 26), schedule_interval='@once'),
+        dag=dag,
+    ),
     alert_slack = PythonOperator(
         task_id='alert_slack',
-        python_callable=slack_message
+        dag=dag,
+        python_callable=slack_message,
     )
+
     check_for_file >> trigger_dag >> process_results >> alert_slack
     globals()['trigger_run'] = dag
+
+

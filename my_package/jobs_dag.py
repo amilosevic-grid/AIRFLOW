@@ -1,14 +1,15 @@
 from datetime import datetime
 from airflow import DAG
-from airflow.operators.bash import BashOperator
-from airflow.operators.python import BranchPythonOperator, get_current_context
+from airflow.operators.bash import  BashOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator, get_current_context
+from airflow.operators.dummy import DummyOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+import logging
 import uuid
 from custom_operator import PostgreSQLCountRows
 
 
-# dag arguments
 config = {
    'dag_id_1': {
        'schedule_interval': None,
@@ -24,8 +25,9 @@ config = {
        'table_name': 'table_3'}}
 
 
-# function that checks if the table exists
 def check_if_table_exists(table_name):
+    """ method to check that table exists """
+
     hook = PostgresHook(postgres_conn_id='postgres_conn')
     query = hook.get_first(f'''SELECT * from information_schema.tables
                                where table_name = \'{table_name}\' and table_schema = \'public\'''')
@@ -35,64 +37,72 @@ def check_if_table_exists(table_name):
         return 'create_table'
 
 
-# function that creates a single dag
+def print_context():
+    context = get_current_context()
+    run_id = context['run_id']
+    return f'{run_id} ended'
+
+
+# def query_table(table_name):
+#     hook = PostgresHook(postgres_conn_id='postgres_conn')
+#     query = hook.get_records(f'SELECT COUNT(*) from {table_name}')
+#     print(query)
+
+
+def print_to_log(dag_id, database):
+    print(f'{dag_id} started processing tables in database: {database}')
+    return f'{dag_id} started processing tables in database: {database}'
+
+
 def create_dag(dag_id, schedule_interval, start_date):
     dag = DAG(dag_id=dag_id, schedule_interval=schedule_interval, start_date=start_date)
-
-    # task definitions
-
-    # print_log task
-    @dag.task()
-    def print_to_log(dag_id, database):
-        print(f'{dag_id} started processing tables in database: {database}')
-
-    print_logs = print_to_log(dag_id, 'postgres')
-
-    # bash task for getting user name
+    print_logs = PythonOperator(
+        python_callable=print_to_log,
+        task_id='print_to_log',
+        op_kwargs={'dag_id': dag_id, 'database': 'postgres'},
+        dag=dag,
+        do_xcom_push=True
+    )
     get_user = BashOperator(
         task_id='get_user',
         bash_command='whoami',
         dag=dag,
-        do_xcom_push=True,
-        queue='jobs_queue'
+        do_xcom_push=True
     )
-
     table_name = config[dag_id]['table_name']
-
-    # calls the function for checking table existence
-    check_table_exist = BranchPythonOperator(
-        task_id='check_table_exist',
-        python_callable=check_if_table_exists,
-        op_args=[table_name],
-        dag=dag,
-        queue='jobs_queue'
-    )
-
-    # inserts new row into the table
     insert_row = PostgresOperator(
-        task_id='insert_new_row',
         postgres_conn_id='postgres_conn',
+        task_id='insert_new_row',
         sql=f'''
             INSERT INTO {table_name} VALUES
             (%s, \'{{{{ ti.xcom_pull(task_ids='get_user') }}}}\', %s);
              ''',
+        trigger_rule='none_failed',
         parameters=[
             uuid.uuid4().int % 123456789,
             datetime.now()
         ],
-        trigger_rule='none_failed',
-        dag=dag,
-        queue='jobs_queue'
+        dag=dag
     )
-    # fetches results from the table
+    check_table_exist = BranchPythonOperator(
+        task_id='check_table_exist',
+        python_callable=check_if_table_exists,
+        dag=dag,
+        op_args=[table_name]
+    )
+    # query_the_table = PythonOperator(
+    #     task_id='query_the_table',
+    #     dag=dag,
+    #     do_xcom_push=True,
+    #     python_callable=query_table,
+    #     op_args=[table_name]
+    # )
     query_the_table = PostgreSQLCountRows(
         task_id='query_the_table',
-        do_xcom_push=True,
-        table_name=table_name,
         dag=dag,
-        queue='jobs_queue'
+        do_xcom_push=True,
+        table_name=table_name
     )
-    # creates a postgres table with table_name
     create_table = PostgresOperator(
         postgres_conn_id='postgres_conn',
         task_id='create_table',
@@ -102,17 +112,13 @@ def create_dag(dag_id, schedule_interval, start_date):
             user_name VARCHAR (50) NOT NULL, 
             timestamp TIMESTAMP NOT NULL);
                 ''',
-        dag=dag,
-        queue='jobs_queue'
+        dag=dag
     )
-
-    # setting task order
     print_logs >> get_user >> check_table_exist >> [create_table, insert_row]
     create_table >> insert_row >> query_the_table
     return dag
 
 
-# forming all three dags from loop
 for dag_id, value in config.items():
     globals()[dag_id] = create_dag(dag_id,
                                    value['schedule_interval'],
