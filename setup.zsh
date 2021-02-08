@@ -1,7 +1,6 @@
 #!/bin/zsh
 
 # create virtual environment and install requirements
-
 virtualenv -p /usr/local/opt/python@3.7/Frameworks/Python.framework/Versions/3.7/bin/python3 airflow-venv
 source airflow-venv/bin/activate
 export AIRFLOW_HOME=~/airflow-venv/airflow-course
@@ -27,8 +26,6 @@ export AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@loc
 export AIRFLOW__SMART_SENSOR__USE_SMART_SENSOR=True
 export AIRFLOW__SMART_SENSOR__SHARDS=1
 export AIRFLOW__SMART_SENSOR__SENSORS_ENABLED=SmartFileSensor
-export AIRFLOW_VAR_SLACK_TOKEN=xoxb-1727046194672-1709378985940-A6HDRTXvZKqhpy8OFC7aBBOf
-
 
 # create airflow user
 
