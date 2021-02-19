@@ -1,9 +1,10 @@
 from airflow.models.baseoperator import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+import logging
 
 
-# custom operator class
+# custom operator class for querying a postgres db table
 class PostgreSQLCountRows(BaseOperator):
 
     @apply_defaults
@@ -17,5 +18,5 @@ class PostgreSQLCountRows(BaseOperator):
     def execute(self, context):
         hook = PostgresHook(postgres_conn_id='postgres_conn')
         query = hook.get_first(f'SELECT COUNT(*) from {self.table_name}')
-        print(query[0])
+        logging.info(query[0])
         return query[0]
