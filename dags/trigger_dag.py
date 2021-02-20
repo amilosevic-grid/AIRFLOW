@@ -9,21 +9,22 @@ from airflow.sensors.external_task import ExternalTaskSensor
 from slack import WebClient
 from slack.errors import SlackApiError
 from smart_sensor_file import SmartFileSensor
+import logging
 
 
 # paths to files
 default_path = '/Users/aleksandarmilosevic/PycharmProjects/AIRFLOW/run.txt'
 path = Variable.get('path_to_file', default_var=default_path)
-slack_token = Variable.get('slack_token')
-# token = 'xoxb-1727046194672-1709378985940-A6HDRTXvZKqhpy8OFC7aBBOf'
+# slack_token = Variable.get('slack_token')
+slack_token = 'xoxb-1727046194672-1709378985940-A6HDRTXvZKqhpy8OFC7aBBOf'
+external_dag = Variable.get('external_dag')
+external_task = Variable.get('external_task')
 
 
 # function for pulling value from query_table task
-def print_res(**context):
+def print_res(task_id, dag_id, **context):
     ti = context['ti']
-    print('=======================================')
-    print(ti.xcom_pull(task_ids='query_the_table', dag_id='dag_id_3'))
-    print('=======================================')
+    logging.info(ti.xcom_pull(task_ids=task_id, dag_id=dag_id))
 
 
 # function that sends a message to a slack channel
@@ -46,14 +47,15 @@ def create_sub_dag(parent_dag, sub_dag_name, start_date, schedule_interval):
         # senses if external dag has started
         task_sensor = ExternalTaskSensor(
             task_id='task_sensor',
-            external_dag_id='dag_id_3',
+            external_dag_id=external_dag,
             external_task_id=None,
             poke_interval=15
         )
         # prints results
         print_results = PythonOperator(
             task_id='print_results',
-            python_callable=print_res
+            python_callable=print_res,
+            op_args=[external_task, external_dag]
         )
         # removes file
         remove_file = BashOperator(
@@ -79,7 +81,7 @@ with DAG(dag_id='trigger_run', start_date=datetime(2021, 1, 26), schedule_interv
     # triggers another dag
     trigger_dag = TriggerDagRunOperator(
         task_id='trigger_dag',
-        trigger_dag_id='dag_id_3',
+        trigger_dag_id=external_dag,
         execution_date='{{ execution_date }}'
     )
     # creates a sub_dag that processes results
@@ -97,4 +99,4 @@ with DAG(dag_id='trigger_run', start_date=datetime(2021, 1, 26), schedule_interv
         python_callable=slack_message
     )
     check_for_file >> trigger_dag >> process_results >> alert_slack
-    globals()['trigger_run'] = dag
+    globals()[dag.dag_id] = dag
